@@ -908,6 +908,12 @@ omr_error_t
 triggerDumpAgents(struct J9JavaVM *vm, struct J9VMThread *self, UDATA eventFlags, struct J9RASdumpEventData *eventData)
 {
 	J9RASdumpQueue *queue;
+        j9object_t emessage = NULL;
+        char stackBuffer[256];
+        char* buf = stackBuffer;
+        UDATA len = 0;
+        char* subDetailedMessage = NULL;
+        UDATA subLength = 0;
 
 	/* we lock the dump configuration here so that the agent and setting queues can't be
 	 * changed underneath us while we're producing the dumps
@@ -1004,7 +1010,32 @@ triggerDumpAgents(struct J9JavaVM *vm, struct J9VMThread *self, UDATA eventFlags
 								OMRPORT_ACCESS_FROM_J9PORT(PORTLIB);
 								char dateStamp[64];
 								omrstr_ftime_ex(dateStamp, sizeof(dateStamp), "%Y/%m/%d %H:%M:%S", now, OMRSTR_FTIME_FLAG_LOCAL);
-								j9nls_printf(PORTLIB, J9NLS_INFO | J9NLS_STDERR | J9NLS_VITAL, J9NLS_DMP_PROCESSING_EVENT_TIME, mapDumpEvent(eventFlags), detailLength, detailData, dateStamp);
+
+								/*If there is more details about the event, print it.
+                                                                 * During abort event detailData is empty string - skip the abort event */
+                                                                if (strcmp (detailData,"") && eventData->exceptionRef && *eventData->exceptionRef) {
+                                                                        emessage = J9VMJAVALANGTHROWABLE_DETAILMESSAGE(self, *eventData->exceptionRef);
+                                                                        if (NULL != emessage) {
+                                                                                subLength = strlen (detailData) + strlen ("\" \"");
+                                                                                subDetailedMessage = (char *)j9mem_allocate_memory(subLength+1, OMRMEM_CATEGORY_VM);
+                                                                                strcpy (subDetailedMessage, detailData);
+                                                                                strcat (subDetailedMessage,"\" \"");
+                                                                                buf = self->javaVM->internalVMFunctions->copyStringToUTF8WithMemAlloc(self, emessage, J9_STR_NULL_TERMINATE_RESULT, subDetailedMessage, subLength, stackBuffer, 256, &len);
+                                                                                if (NULL != buf) {
+                                        						j9nls_printf(PORTLIB, J9NLS_INFO | J9NLS_STDERR | J9NLS_VITAL, J9NLS_DMP_PROCESSING_EVENT_TIME, mapDumpEvent(eventFlags), strlen (buf), buf, dateStamp);
+                                						}
+                                                                        }
+                                                                        if (buf != stackBuffer) {
+                                                                                j9mem_free_memory(buf);
+                                                                        }
+                                                                        if (NULL != subDetailedMessage) {
+                                                                                j9mem_free_memory(subDetailedMessage);
+                                                                        }
+                                                                }
+                                                                else {
+                                                                        j9nls_printf(PORTLIB, J9NLS_INFO | J9NLS_STDERR | J9NLS_VITAL, J9NLS_DMP_PROCESSING_EVENT_TIME, mapDumpEvent(eventFlags), detailLength, detailData, dateStamp);
+                                                                }
+
 								printed = 1;
 							}
 						}
